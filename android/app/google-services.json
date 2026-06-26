@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "637423664987",
+    "project_id": "cfts-da53b",
+    "storage_bucket": "cfts-da53b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:637423664987:android:c7e9053b3dff21c8c5647e",
+        "android_client_info": {
+          "package_name": "com.KQG.court_case_tracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtP37cujyIjvDYWXCClnjFMK9LmlbmqdU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
