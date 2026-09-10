@@ -146,7 +146,26 @@ class TransferDialog extends ConsumerWidget {
       currentHolderType: toUserRole,
       currentHolderName: toUserName,
       location: newLocation,
+      lastOperation: 'نقل إلى $toUserName',
+      lastOperationDate: DateTime.now(),
+      lastOperationBy: user.id,
     ));
+
+    // Notify the recipient (skip for data center which has no specific user)
+    if (toUserId.isNotEmpty) {
+      final notifService = ref.read(notificationServiceProvider);
+      final notification = notifService.createTransferNotification(
+        userId: toUserId,
+        caseId: caseData.id,
+        caseNumber: caseData.caseNumber,
+        caseSummary: caseData.caseSummary,
+        holderName: caseData.currentHolderName,
+        fromUserName: user.name,
+        toUserName: toUserName,
+        type: 'transfer',
+      );
+      await service.addNotification(notification);
+    }
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

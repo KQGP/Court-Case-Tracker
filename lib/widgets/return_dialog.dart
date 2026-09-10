@@ -42,6 +42,7 @@ class ReturnDialog extends ConsumerWidget {
             onPressed: () async {
               Navigator.pop(context);
               final service = ref.read(firestoreServiceProvider);
+              final notifService = ref.read(notificationServiceProvider);
               final now = DateTime.now();
 
               // Update transfer record
@@ -65,6 +66,9 @@ class ReturnDialog extends ConsumerWidget {
                 currentHolderType: toUserRole,
                 currentHolderName: toUserName,
                 location: newLocation,
+                lastOperation: 'إرجاع إلى $toUserName',
+                lastOperationDate: now,
+                lastOperationBy: latestTransfer.toUserId,
               ));
 
               await service.addHistory(HistoryModel(
@@ -77,6 +81,21 @@ class ReturnDialog extends ConsumerWidget {
                 previousValue: caseData.location,
                 newValue: newLocation,
               ));
+
+              // Notify the returning holder
+              if (toUserId.isNotEmpty) {
+                final notification = notifService.createTransferNotification(
+                  userId: toUserId,
+                  caseId: caseData.id,
+                  caseNumber: caseData.caseNumber,
+                  caseSummary: caseData.caseSummary,
+                  holderName: caseData.currentHolderName,
+                  fromUserName: latestTransfer.toUserName,
+                  toUserName: toUserName,
+                  type: 'transfer',
+                );
+                await service.addNotification(notification);
+              }
             },
             child: const Text('تأكيد الإرجاع'),
           ),

@@ -1,8 +1,57 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/index.dart';
+import 'offline_service.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final OfflineService _offline = OfflineService();
+
+  // Checks current connectivity.
+  Future<bool> hasConnection() async {
+    final results = await Connectivity().checkConnectivity();
+    return results.any((result) => result != ConnectivityResult.none);
+  }
+
+  // Writes either directly (online) or queues the operation (offline).
+  // Returns true when written directly, false when queued for later sync.
+  Future<bool> _write({
+    required String operation,
+    required String collection,
+    required String docId,
+    required Map<String, dynamic> data,
+    String userRole = '',
+  }) async {
+    if (await hasConnection()) {
+      switch (operation) {
+        case 'add':
+          await _db.collection(collection).doc(docId).set(data);
+          break;
+        case 'update':
+          await _db.collection(collection).doc(docId).set(data, SetOptions(merge: true));
+          break;
+        case 'delete':
+          await _db.collection(collection).doc(docId).delete();
+          break;
+      }
+      return true;
+    } else {
+      await _offline.enqueueOperation(
+        operation: operation,
+        collection: collection,
+        docId: docId,
+        data: data,
+        userRole: userRole,
+      );
+      return false;
+    }
+  }
+
+  // Processes any pending offline operations if we are back online.
+  Future<void> syncPendingOperations() async {
+    if (!await hasConnection()) return;
+    await _offline.processQueue();
+  }
 
   // MARK: - Users
   CollectionReference<UserModel> get _users =>
@@ -19,12 +68,27 @@ class FirestoreService {
     return doc.data();
   }
 
-  Future<void> addUser(UserModel user) => _users.doc(user.id).set(user);
+  Future<void> addUser(UserModel user) async {
+    await _write(
+      operation: 'add',
+      collection: 'users',
+      docId: user.id,
+      data: user.toFirestore(),
+    );
+  }
 
-  Future<void> updateUser(String id, UserModel user) =>
-      _users.doc(id).set(user);
+  Future<void> updateUser(String id, UserModel user) async {
+    await _write(
+      operation: 'update',
+      collection: 'users',
+      docId: id,
+      data: user.toFirestore(),
+    );
+  }
 
-  Future<void> deleteUser(String id) => _users.doc(id).delete();
+  Future<void> deleteUser(String id) async {
+    await _write(operation: 'delete', collection: 'users', docId: id, data: {});
+  }
 
   // MARK: - Cases
   CollectionReference<CaseModel> get _cases =>
@@ -41,12 +105,27 @@ class FirestoreService {
     return doc.data();
   }
 
-  Future<void> addCase(CaseModel c) => _cases.doc(c.id).set(c);
+  Future<void> addCase(CaseModel c) async {
+    await _write(
+      operation: 'add',
+      collection: 'cases',
+      docId: c.id,
+      data: c.toFirestore(),
+    );
+  }
 
-  Future<void> updateCase(String id, CaseModel c) =>
-      _cases.doc(id).set(c);
+  Future<void> updateCase(String id, CaseModel c) async {
+    await _write(
+      operation: 'update',
+      collection: 'cases',
+      docId: id,
+      data: c.toFirestore(),
+    );
+  }
 
-  Future<void> deleteCase(String id) => _cases.doc(id).delete();
+  Future<void> deleteCase(String id) async {
+    await _write(operation: 'delete', collection: 'cases', docId: id, data: {});
+  }
 
   // MARK: - Transfers
   CollectionReference<TransferModel> get _transfers =>
@@ -60,11 +139,23 @@ class FirestoreService {
             (snap) => snap.docs.map((d) => d.data()).toList(),
           );
 
-  Future<void> addTransfer(TransferModel t) =>
-      _transfers.doc(t.id).set(t);
+  Future<void> addTransfer(TransferModel t) async {
+    await _write(
+      operation: 'add',
+      collection: 'transfers',
+      docId: t.id,
+      data: t.toFirestore(),
+    );
+  }
 
-  Future<void> updateTransfer(String id, TransferModel t) =>
-      _transfers.doc(id).set(t);
+  Future<void> updateTransfer(String id, TransferModel t) async {
+    await _write(
+      operation: 'update',
+      collection: 'transfers',
+      docId: id,
+      data: t.toFirestore(),
+    );
+  }
 
   // MARK: - Sessions
   CollectionReference<SessionModel> get _sessions =>
@@ -78,8 +169,14 @@ class FirestoreService {
             (snap) => snap.docs.map((d) => d.data()).toList(),
           );
 
-  Future<void> addSession(SessionModel s) =>
-      _sessions.doc(s.id).set(s);
+  Future<void> addSession(SessionModel s) async {
+    await _write(
+      operation: 'add',
+      collection: 'sessions',
+      docId: s.id,
+      data: s.toFirestore(),
+    );
+  }
 
   // MARK: - History
   CollectionReference<HistoryModel> get _history =>
@@ -93,8 +190,14 @@ class FirestoreService {
             (snap) => snap.docs.map((d) => d.data()).toList(),
           );
 
-  Future<void> addHistory(HistoryModel h) =>
-      _history.doc(h.id).set(h);
+  Future<void> addHistory(HistoryModel h) async {
+    await _write(
+      operation: 'add',
+      collection: 'history',
+      docId: h.id,
+      data: h.toFirestore(),
+    );
+  }
 
   // MARK: - Notifications
   CollectionReference<NotificationModel> get _notifications =>
@@ -108,11 +211,18 @@ class FirestoreService {
             (snap) => snap.docs.map((d) => d.data()).toList(),
           );
 
-  Future<void> addNotification(NotificationModel n) =>
-      _notifications.doc(n.id).set(n);
+  Future<void> addNotification(NotificationModel n) async {
+    await _write(
+      operation: 'add',
+      collection: 'notifications',
+      docId: n.id,
+      data: n.toFirestore(),
+    );
+  }
 
-  Future<void> markNotificationRead(String id) =>
-      _notifications.doc(id).update({'read': true});
+  Future<void> markNotificationRead(String id) async {
+    await _db.collection('notifications').doc(id).update({'read': true});
+  }
 
   // MARK: - Settings
   Future<Map<String, dynamic>> getSettings() async {
@@ -120,6 +230,12 @@ class FirestoreService {
     return snap.data() ?? {};
   }
 
-  Future<void> updateSettings(Map<String, dynamic> settings) =>
-      _db.collection('settings').doc('app_settings').set(settings);
+  Future<void> updateSettings(Map<String, dynamic> settings) async {
+    await _write(
+      operation: 'update',
+      collection: 'settings',
+      docId: 'app_settings',
+      data: settings,
+    );
+  }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../models/index.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/cases_provider.dart';
 import '../../providers/service_providers.dart';
@@ -20,7 +21,7 @@ class DashboardScreen extends ConsumerWidget {
         appBar: AppBar(
           title: Text(AppConstants.appName),
           actions: [
-            StreamBuilder<List>(
+            StreamBuilder<List<NotificationModel>>(
               stream: user != null
                   ? ref.read(firestoreServiceProvider).getNotifications(user.id)
                   : const Stream.empty(),
@@ -54,11 +55,14 @@ class DashboardScreen extends ConsumerWidget {
               },
             ),
             PopupMenuButton<String>(
-              onSelected: (value) {
+              onSelected: (value) async {
                 if (value == 'logout') {
-                  ref.read(authServiceProvider).logout();
+                  await ref.read(authServiceProvider).logout();
                   ref.read(authStateProvider.notifier).state = null;
-                  Navigator.pushReplacementNamed(context, '/login');
+                  await ref.read(sessionServiceProvider).clear();
+                  if (context.mounted) {
+                    Navigator.pushReplacementNamed(context, '/login');
+                  }
                 } else if (value == 'settings' && user?.role == 'admin') {
                   Navigator.pushNamed(context, '/settings');
                 } else if (value == 'users' && user?.role == 'admin') {
@@ -113,7 +117,7 @@ class DashboardScreen extends ConsumerWidget {
                         ),
                       ],
                     ),
-                    error: (_, __) => const Text('خطأ في تحميل البيانات'),
+                    error: (_, _) => const Text('خطأ في تحميل البيانات'),
                     loading: () => const Center(child: CircularProgressIndicator()),
                   ),
                 ),
@@ -169,7 +173,7 @@ class DashboardScreen extends ConsumerWidget {
                     ),
                   );
                 },
-                error: (_, __) => const SliverToBoxAdapter(
+                error: (_, _) => const SliverToBoxAdapter(
                   child: Center(child: Text('خطأ في تحميل البيانات')),
                 ),
                 loading: () => const SliverToBoxAdapter(
@@ -220,7 +224,7 @@ class DashboardScreen extends ConsumerWidget {
                 ],
               ),
               Expanded(
-                child: StreamBuilder<List>(
+                child: StreamBuilder<List<NotificationModel>>(
                   stream: service.getNotifications(userId),
                   builder: (context, snapshot) {
                     if (!snapshot.hasData) {

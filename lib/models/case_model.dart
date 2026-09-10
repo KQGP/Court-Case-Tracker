@@ -128,6 +128,10 @@ class CaseModel {
     String? year,
     String? category,
     String? caseSummary,
+    String? partyOneName,
+    List<String>? partyOnePersons,
+    String? partyTwoName,
+    List<String>? partyTwoPersons,
     String? status,
     String? currentHolder,
     String? currentHolderType,
@@ -142,6 +146,8 @@ class CaseModel {
     DateTime? lastOperationDate,
     String? lastOperationBy,
     String? location,
+    DateTime? createdAt,
+    String? createdBy,
   }) {
     return CaseModel(
       id: id,
@@ -149,10 +155,10 @@ class CaseModel {
       year: year ?? this.year,
       category: category ?? this.category,
       caseSummary: caseSummary ?? this.caseSummary,
-      partyOneName: partyOneName,
-      partyOnePersons: partyOnePersons,
-      partyTwoName: partyTwoName,
-      partyTwoPersons: partyTwoPersons,
+      partyOneName: partyOneName ?? this.partyOneName,
+      partyOnePersons: partyOnePersons ?? this.partyOnePersons,
+      partyTwoName: partyTwoName ?? this.partyTwoName,
+      partyTwoPersons: partyTwoPersons ?? this.partyTwoPersons,
       status: status ?? this.status,
       currentHolder: currentHolder ?? this.currentHolder,
       currentHolderType: currentHolderType ?? this.currentHolderType,
@@ -167,8 +173,8 @@ class CaseModel {
       lastOperationDate: lastOperationDate ?? this.lastOperationDate,
       lastOperationBy: lastOperationBy ?? this.lastOperationBy,
       location: location ?? this.location,
-      createdAt: createdAt,
-      createdBy: createdBy,
+      createdAt: createdAt ?? this.createdAt,
+      createdBy: createdBy ?? this.createdBy,
     );
   }
 }

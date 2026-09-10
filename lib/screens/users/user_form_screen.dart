@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/index.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/service_providers.dart';
+import '../../services/auth_service.dart';
 import '../../utils/helpers.dart';
 
 class UserFormScreen extends ConsumerStatefulWidget {
@@ -16,10 +17,13 @@ class UserFormScreen extends ConsumerStatefulWidget {
 class _UserFormScreenState extends ConsumerState<UserFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
   final _departmentCtrl = TextEditingController();
 
   String _role = 'clerk';
   bool _active = true;
+  bool _obscure = true;
   Map<String, bool> _permissions = {};
 
   bool _loading = false;
@@ -37,6 +41,7 @@ class _UserFormScreenState extends ConsumerState<UserFormScreen> {
     if (u != null && mounted) {
       setState(() {
         _nameCtrl.text = u.name;
+        _emailCtrl.text = u.email;
         _departmentCtrl.text = u.department;
         _role = u.role;
         _active = u.active;
@@ -48,6 +53,8 @@ class _UserFormScreenState extends ConsumerState<UserFormScreen> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
     _departmentCtrl.dispose();
     super.dispose();
   }
@@ -57,21 +64,52 @@ class _UserFormScreenState extends ConsumerState<UserFormScreen> {
 
     setState(() => _loading = true);
 
-    final user = ref.read(authStateProvider);
+    final admin = ref.read(authStateProvider);
+    final authService = ref.read(authServiceProvider);
+    final firestore = ref.read(firestoreServiceProvider);
 
-    final u = UserModel(
-      id: widget.editUserId ?? Helpers.generateId(),
-      name: _nameCtrl.text.trim(),
-      role: _role,
-      department: _departmentCtrl.text.trim(),
-      active: _active,
-      permissions: Map.from(_permissions),
-      createdBy: user?.id ?? '',
-    );
+    try {
+      String uid = widget.editUserId ?? '';
 
-    await ref.read(firestoreServiceProvider).addUser(u);
+      if (widget.editUserId == null) {
+        // Create the Firebase Auth account for the new user.
+        uid = await authService.register(
+          _emailCtrl.text.trim(),
+          _passwordCtrl.text,
+        );
+      }
 
-    if (mounted) Navigator.pop(context);
+      final u = UserModel(
+        id: uid,
+        email: _emailCtrl.text.trim(),
+        name: _nameCtrl.text.trim(),
+        role: _role,
+        department: _departmentCtrl.text.trim(),
+        active: _active,
+        permissions: Map.from(_permissions),
+        createdBy: admin?.id ?? '',
+      );
+
+      if (widget.editUserId == null) {
+        await firestore.addUser(u);
+      } else {
+        await firestore.updateUser(widget.editUserId!, u);
+      }
+
+      if (mounted) Navigator.pop(context);
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -94,12 +132,46 @@ class _UserFormScreenState extends ConsumerState<UserFormScreen> {
               ),
               const SizedBox(height: 16),
               TextFormField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'البريد الإلكتروني'),
+                validator: (v) {
+                  final val = v?.trim() ?? '';
+                  if (widget.editUserId == null && val.isEmpty) return 'مطلوب';
+                  if (val.isNotEmpty &&
+                      !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(val)) {
+                    return 'بريد إلكتروني غير صالح';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              if (widget.editUserId == null)
+                TextFormField(
+                  controller: _passwordCtrl,
+                  obscureText: _obscure,
+                  decoration: InputDecoration(
+                    labelText: 'كلمة المرور',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+                      onPressed: () => setState(() => _obscure = !_obscure),
+                    ),
+                  ),
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'مطلوب';
+                    if (v.length < 6) return '6 أحرف على الأقل';
+                    return null;
+                  },
+                ),
+              const SizedBox(height: 16),
+              TextFormField(
                 controller: _departmentCtrl,
                 decoration: const InputDecoration(labelText: 'القسم'),
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _role,
+                initialValue: _role,
                 decoration: const InputDecoration(labelText: 'الدور'),
                 items: ['admin', 'judge', 'clerk'].map((r) {
                   return DropdownMenuItem(value: r, child: Text(Helpers.roleLabel(r)));

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/service_providers.dart';
 import '../../utils/constants.dart';
-import '../../utils/helpers.dart';
+import '../../services/auth_service.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -13,39 +13,108 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+
   bool _checking = true;
   bool _loading = false;
+  bool _obscure = true;
 
   @override
   void initState() {
     super.initState();
-    _checkForUsers();
+    _bootstrap();
   }
 
-  Future<void> _checkForUsers() async {
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .limit(1)
-        .get();
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _bootstrap() async {
+    // 1. Restore any persisted Firebase Auth session.
+    final savedUser = await ref.read(authServiceProvider).restoreSession();
+    if (savedUser != null) {
+      ref.read(authStateProvider.notifier).state = savedUser;
+      await ref.read(sessionServiceProvider).saveUserId(savedUser.id);
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/dashboard');
+      }
+      return;
+    }
+
+    // 2. If no admin account has been created yet on this device, route to setup.
+    final setupDone = await ref.read(sessionServiceProvider).isSetupComplete();
     if (!mounted) return;
-    if (snap.docs.isEmpty) {
+    if (!setupDone) {
       Navigator.pushReplacementNamed(context, '/setup');
       return;
     }
+
     setState(() => _checking = false);
   }
 
-  Future<void> _selectUser(String userId) async {
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _loading = true);
+
+    final authService = ref.read(authServiceProvider);
+    try {
+      final user = await authService.login(
+        _emailCtrl.text.trim(),
+        _passwordCtrl.text,
+      );
+      if (user == null) {
+        throw AuthException('المستخدم غير موجود');
+      }
+      await ref.read(sessionServiceProvider).saveUserId(user.id);
+      ref.read(authStateProvider.notifier).state = user;
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/dashboard');
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _googleLogin() async {
     setState(() => _loading = true);
     final authService = ref.read(authServiceProvider);
-    final user = await authService.login(userId);
-    if (!mounted) return;
-    setState(() => _loading = false);
-    if (user == null) return;
-
-    ref.read(authStateProvider.notifier).state = user;
-    if (mounted) {
-      Navigator.pushReplacementNamed(context, '/dashboard');
+    try {
+      final user = await authService.signInWithGoogle();
+      if (user == null) {
+        throw AuthException('تعذر الحصول على بيانات الحساب');
+      }
+      await ref.read(sessionServiceProvider).saveUserId(user.id);
+      ref.read(authStateProvider.notifier).state = user;
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/dashboard');
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -63,98 +132,111 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         body: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.folder_special,
-                  size: 80,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  AppConstants.appName,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.folder_special,
+                      size: 80,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      AppConstants.appName,
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'نظام تتبع ملفات القضايا',
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: Colors.grey[600],
+                          ),
+                    ),
+                    const SizedBox(height: 40),
+                    TextFormField(
+                      controller: _emailCtrl,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                        labelText: 'البريد الإلكتروني',
+                        prefixIcon: Icon(Icons.email_outlined),
+                        border: OutlineInputBorder(),
                       ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'نظام تتبع ملفات القضايا',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Colors.grey[600],
+                      validator: (v) =>
+                          v == null || v.trim().isEmpty ? 'مطلوب' : null,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _passwordCtrl,
+                      obscureText: _obscure,
+                      decoration: InputDecoration(
+                        labelText: 'كلمة المرور',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscure
+                              ? Icons.visibility_off
+                              : Icons.visibility),
+                          onPressed: () =>
+                              setState(() => _obscure = !_obscure),
+                        ),
                       ),
+                      validator: (v) =>
+                          v == null || v.isEmpty ? 'مطلوب' : null,
+                      onFieldSubmitted: (_) => _login(),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      height: 48,
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _loading ? null : _login,
+                        icon: _loading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.login),
+                        label: const Text('تسجيل الدخول'),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: const [
+                        Expanded(child: Divider()),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 8),
+                          child: Text('أو'),
+                        ),
+                        Expanded(child: Divider()),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 48,
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _loading ? null : _googleLogin,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.black87,
+                        ),
+                        icon: const Icon(Icons.g_mobiledata, size: 28),
+                        label: const Text('الدخول بواسطة Google'),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 48),
-                const Text('اختر مستخدم للدخول'),
-                const SizedBox(height: 16),
-                _UsersList(onUserTap: _selectUser),
-                if (_loading)
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: CircularProgressIndicator(),
-                  ),
-              ],
+              ),
             ),
           ),
         ),
       ),
-    );
-  }
-}
-
-class _UsersList extends StatelessWidget {
-  final ValueChanged<String> onUserTap;
-  const _UsersList({required this.onUserTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .where('active', isEqualTo: true)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Text('خطأ: ${snapshot.error}');
-        }
-        if (!snapshot.hasData) {
-          return const CircularProgressIndicator();
-        }
-        final users = snapshot.data!.docs;
-        if (users.isEmpty) {
-          return const Text('لا يوجد مستخدمين نشطين');
-        }
-        return SizedBox(
-          height: 300,
-          child: ListView.builder(
-            itemCount: users.length,
-            itemBuilder: (context, index) {
-              final doc = users[index];
-              final data = doc.data() as Map<String, dynamic>;
-              final role = data['role'] as String? ?? '';
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    child: Icon(
-                      role == 'admin'
-                          ? Icons.admin_panel_settings
-                          : role == 'judge'
-                              ? Icons.gavel
-                              : Icons.person,
-                    ),
-                  ),
-                  title: Text(data['name'] as String? ?? ''),
-                  subtitle: Text(Helpers.roleLabel(role)),
-                  trailing: const Icon(Icons.login),
-                  onTap: () => onUserTap(doc.id),
-                ),
-              );
-            },
-          ),
-        );
-      },
     );
   }
 }

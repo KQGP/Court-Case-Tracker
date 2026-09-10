@@ -26,19 +26,23 @@ class _NotificationSettingsScreenState extends ConsumerState<NotificationSetting
   }
 
   Future<void> _loadSettings() async {
-    final settings = ref.read(settingsProvider);
-    settings.whenData((data) {
-      if (data.isNotEmpty && mounted) {
+    try {
+      final data = await ref.read(settingsProvider.future);
+      if (mounted) {
         setState(() {
-          _transferNotifications = data['transferNotifications'] ?? true;
-          _overdueNotifications = data['overdueNotifications'] ?? true;
-          _sessionReminders = data['sessionReminders'] ?? true;
-          _verificationRequests = data['verificationRequests'] ?? true;
-          _overdueThresholdDays = data['overdueThresholdDays'] ?? 7;
-          _sessionReminderDays = data['sessionReminderDays'] ?? 3;
+          if (data.isNotEmpty) {
+            _transferNotifications = data['transferNotifications'] ?? true;
+            _overdueNotifications = data['overdueNotifications'] ?? true;
+            _sessionReminders = data['sessionReminders'] ?? true;
+            _verificationRequests = data['verificationRequests'] ?? true;
+            _overdueThresholdDays = data['overdueThresholdDays'] ?? 7;
+            _sessionReminderDays = data['sessionReminderDays'] ?? 3;
+          }
         });
       }
-    });
+    } catch (_) {
+      // No settings saved yet or connection error; keep defaults.
+    }
   }
 
   Future<void> _saveSettings() async {

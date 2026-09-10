@@ -1,0 +1,66 @@
+rules_version = '2';
+
+// Court Case Tracker security rules.
+//
+// Authentication is enforced throughout: every request must come from a
+// signed-in Firebase Auth user. The user profile document is stored at
+// /users/{uid} where {uid} is the Firebase Auth UID.
+//
+// - Read:          any authenticated user may read data.
+// - Self-create:   a user may create their own profile (used on first-run
+//                   setup where the first admin registers via email/password).
+// - User management (update/delete users): admins only.
+// - All other collections: any authenticated user may read/write.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Users (profiles keyed by Auth UID)
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      // A user may create their own profile doc (first admin setup, or
+      // self-registration); admins may create profiles for other users.
+      allow create: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    // Cases
+    match /cases/{caseId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Transfers
+    match /transfers/{transferId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Sessions
+    match /sessions/{sessionId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // History
+    match /history/{historyId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Settings (app-wide config; admins may write, all may read)
+    match /settings/{settingsId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

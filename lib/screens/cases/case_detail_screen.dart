@@ -241,7 +241,7 @@ class CaseDetailScreen extends ConsumerWidget {
                           ),
                         );
                       },
-                      error: (_, __) => const Text('خطأ'),
+                      error: (_, _) => const Text('خطأ'),
                       loading: () => const CircularProgressIndicator(),
                     ),
                     const SizedBox(height: 16),
@@ -268,7 +268,7 @@ class CaseDetailScreen extends ConsumerWidget {
                           ),
                         );
                       },
-                      error: (_, __) => const Text('خطأ'),
+                      error: (_, _) => const Text('خطأ'),
                       loading: () => const CircularProgressIndicator(),
                     ),
                     const SizedBox(height: 16),
@@ -299,7 +299,7 @@ class CaseDetailScreen extends ConsumerWidget {
                           },
                         );
                       },
-                      error: (_, __) => const Text('خطأ'),
+                      error: (_, _) => const Text('خطأ'),
                       loading: () => const CircularProgressIndicator(),
                     ),
                   ],
@@ -373,35 +373,27 @@ class CaseDetailScreen extends ConsumerWidget {
     }
   }
 
-  void _showTransferDialog(BuildContext context, WidgetRef ref, CaseModel c) {
-    showDialog(
-      context: context,
-      builder: (ctx) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: AlertDialog(
-          title: const Text('نقل الملف'),
-          content: const Text('جارٍ تحميل المستخدمين...'),
+  Future<void> _showTransferDialog(BuildContext context, WidgetRef ref, CaseModel c) async {
+    try {
+      final users = await ref.read(usersStreamProvider.future);
+      final judges = users.where((u) => u.role == 'judge' && u.active).toList();
+      final clerks = users.where((u) => u.role == 'clerk' && u.active).toList();
+      if (!context.mounted) return;
+      await showDialog(
+        context: context,
+        builder: (ctx) => TransferDialog(
+          caseData: c,
+          judges: judges,
+          clerks: clerks,
         ),
-      ),
-    );
-    // Load judges and clerks, then show transfer dialog
-    final judgesAsync = ref.read(judgesProvider);
-    final clerksAsync = ref.read(clerksProvider);
-    judgesAsync.whenData((judges) {
-      clerksAsync.whenData((clerks) {
-        if (context.mounted) {
-          Navigator.pop(context); // close loading dialog
-          showDialog(
-            context: context,
-            builder: (ctx) => TransferDialog(
-              caseData: c,
-              judges: judges,
-              clerks: clerks,
-            ),
-          );
-        }
-      });
-    });
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ في تحميل المستخدمين: $e')),
+        );
+      }
+    }
   }
 
   void _showReturnDialog(BuildContext context, WidgetRef ref, CaseModel c) async {
@@ -456,6 +448,7 @@ class CaseDetailScreen extends ConsumerWidget {
                 final user = ref.read(authStateProvider);
                 if (user == null) return;
                 final service = ref.read(firestoreServiceProvider);
+                final notifService = ref.read(notificationServiceProvider);
                 await service.updateTransfer(
                   transfer.id,
                   transfer.copyWith(
@@ -464,6 +457,18 @@ class CaseDetailScreen extends ConsumerWidget {
                     verifiedBy: user.name,
                   ),
                 );
+                // Notify the sender that the file was confirmed received
+                if (transfer.fromUserId.isNotEmpty) {
+                  final caseData = await service.getCase(transfer.caseId);
+                  final notification = notifService.createVerificationNotification(
+                    userId: transfer.fromUserId,
+                    caseId: transfer.caseId,
+                    caseNumber: caseData?.caseNumber ?? '',
+                    caseSummary: caseData?.caseSummary ?? '',
+                    fromUserName: user.name,
+                  );
+                  await service.addNotification(notification);
+                }
                 if (ctx.mounted) {
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -481,73 +486,114 @@ class CaseDetailScreen extends ConsumerWidget {
 
   void _showSessionDialog(BuildContext context, WidgetRef ref, CaseModel c) {
     final service = ref.read(firestoreServiceProvider);
+    final notifService = ref.read(notificationServiceProvider);
     final user = ref.read(authStateProvider);
     final dateCtrl = TextEditingController();
     final operationCtrl = TextEditingController();
     final resultCtrl = TextEditingController();
     DateTime selectedDate = DateTime.now();
+    DateTime? nextDate;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('إضافة جلسة'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.calendar_today),
-              title: Text('تاريخ الجلسة: ${Helpers.formatDate(selectedDate)}'),
-              onTap: () async {
-                final date = await showDatePicker(
-                  context: ctx,
-                  initialDate: selectedDate,
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime(2030),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('إضافة جلسة'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.calendar_today),
+                title: Text('تاريخ الجلسة: ${Helpers.formatDate(selectedDate)}'),
+                onTap: () async {
+                  final date = await showDatePicker(
+                    context: ctx,
+                    initialDate: selectedDate,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2030),
+                  );
+                  if (date != null) {
+                    selectedDate = date;
+                    dateCtrl.text = Helpers.formatDate(date);
+                    setDialogState(() {});
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.event),
+                title: Text(nextDate == null
+                    ? 'الجلسة القادمة: اضغط لتحديد'
+                    : 'الجلسة القادمة: ${Helpers.formatDate(nextDate)}'),
+                onTap: () async {
+                  final date = await showDatePicker(
+                    context: ctx,
+                    initialDate: nextDate ?? selectedDate,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2100),
+                  );
+                  if (date != null) {
+                    nextDate = date;
+                    setDialogState(() {});
+                  }
+                },
+              ),
+              TextField(controller: operationCtrl, decoration: const InputDecoration(labelText: 'العملية')),
+              TextField(controller: resultCtrl, decoration: const InputDecoration(labelText: 'النتيجة')),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            ElevatedButton(
+              onPressed: () async {
+                if (user == null) return;
+                final session = SessionModel(
+                  id: Helpers.generateId(),
+                  caseId: c.id,
+                  sessionDate: selectedDate,
+                  nextSessionDate: nextDate,
+                  operation: operationCtrl.text,
+                  result: resultCtrl.text,
+                  createdBy: user.id,
                 );
-                if (date != null) {
-                  selectedDate = date;
-                  dateCtrl.text = Helpers.formatDate(date);
+                await service.addSession(session);
+                await service.updateCase(c.id, c.copyWith(
+                  lastSessionDate: session.sessionDate,
+                  nextSessionDate: nextDate,
+                  lastOperation: operationCtrl.text,
+                  lastOperationDate: DateTime.now(),
+                  lastOperationBy: user.id,
+                ));
+                await service.addHistory(HistoryModel(
+                  id: Helpers.generateId(),
+                  caseId: c.id,
+                  type: 'session',
+                  description: 'إضافة جلسة: ${operationCtrl.text}',
+                  performedBy: user.id,
+                  performedByName: user.name,
+                  newValue: operationCtrl.text,
+                ));
+
+                // Notify the assigned judge about the upcoming session
+                if (nextDate != null) {
+                  final targetId = c.assignedJudgeId.isNotEmpty ? c.assignedJudgeId : c.currentHolder;
+                  if (targetId.isNotEmpty) {
+                    final notification = notifService.createSessionNotification(
+                      userId: targetId,
+                      caseId: c.id,
+                      caseNumber: c.caseNumber,
+                      caseSummary: c.caseSummary,
+                      holderName: c.assignedJudgeName.isNotEmpty ? c.assignedJudgeName : c.currentHolderName,
+                      sessionDate: nextDate!,
+                    );
+                    await service.addNotification(notification);
+                  }
                 }
+                if (ctx.mounted) Navigator.pop(ctx);
               },
+              child: const Text('إضافة'),
             ),
-            TextField(controller: operationCtrl, decoration: const InputDecoration(labelText: 'العملية')),
-            TextField(controller: resultCtrl, decoration: const InputDecoration(labelText: 'النتيجة')),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
-          ElevatedButton(
-            onPressed: () async {
-              if (user == null) return;
-              final session = SessionModel(
-                id: Helpers.generateId(),
-                caseId: c.id,
-                sessionDate: selectedDate,
-                operation: operationCtrl.text,
-                result: resultCtrl.text,
-                createdBy: user.id,
-              );
-              await service.addSession(session);
-              await service.updateCase(c.id, c.copyWith(
-                lastSessionDate: session.sessionDate,
-                lastOperation: operationCtrl.text,
-                lastOperationDate: DateTime.now(),
-                lastOperationBy: user.id,
-              ));
-              await service.addHistory(HistoryModel(
-                id: Helpers.generateId(),
-                caseId: c.id,
-                type: 'session',
-                description: 'إضافة جلسة: ${operationCtrl.text}',
-                performedBy: user.id,
-                performedByName: user.name,
-                newValue: operationCtrl.text,
-              ));
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: const Text('إضافة'),
-          ),
-        ],
       ),
     );
   }
@@ -564,19 +610,22 @@ class CaseDetailScreen extends ConsumerWidget {
           title: const Text('تغيير حالة القضية'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
-            children: ['active', 'ended', 'archived'].map((s) {
-              return ListTile(
-                title: Text(Helpers.statusLabel(s)),
-                leading: Radio<String>(
-                  value: s,
-                  groupValue: newStatus,
-                  onChanged: (v) {
-                    setDialogState(() => newStatus = v!);
-                  },
+            children: [
+              RadioGroup<String>(
+                groupValue: newStatus,
+                onChanged: (v) => setDialogState(() => newStatus = v ?? newStatus),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: ['active', 'ended', 'archived'].map((s) {
+                    return RadioListTile<String>(
+                      dense: true,
+                      title: Text(Helpers.statusLabel(s)),
+                      value: s,
+                    );
+                  }).toList(),
                 ),
-                onTap: () => setDialogState(() => newStatus = s),
-              );
-            }).toList(),
+              ),
+            ],
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),

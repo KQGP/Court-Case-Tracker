@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/index.dart';
 import '../../providers/service_providers.dart';
 import '../../providers/auth_provider.dart';
-import '../../utils/helpers.dart';
+import '../../services/auth_service.dart';
 
 class SetupScreen extends ConsumerStatefulWidget {
   const SetupScreen({super.key});
@@ -15,11 +15,16 @@ class SetupScreen extends ConsumerStatefulWidget {
 class _SetupScreenState extends ConsumerState<SetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  bool _obscure = true;
   bool _loading = false;
 
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
     super.dispose();
   }
 
@@ -27,19 +32,56 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
-    final service = ref.read(firestoreServiceProvider);
-    final admin = UserModel(
-      id: Helpers.generateId(),
-      name: _nameCtrl.text.trim(),
-      role: 'admin',
-      active: true,
-    );
+    final authService = ref.read(authServiceProvider);
+    try {
+      // 1. Create the Firebase Auth account and get its UID.
+      final uid = await authService.register(
+        _emailCtrl.text.trim(),
+        _passwordCtrl.text,
+      );
 
-    await service.addUser(admin);
+      // 2. Write the admin profile using the Auth UID as the document id.
+      final service = ref.read(firestoreServiceProvider);
+      final admin = UserModel(
+        id: uid,
+        email: _emailCtrl.text.trim(),
+        name: _nameCtrl.text.trim(),
+        role: 'admin',
+        active: true,
+      );
+      await service.addUser(admin);
 
-    ref.read(authStateProvider.notifier).state = admin;
-    if (mounted) {
-      Navigator.pushReplacementNamed(context, '/dashboard');
+      // Seed default app settings (also creates the settings collection)
+      await service.updateSettings({
+        'transferNotifications': true,
+        'overdueNotifications': true,
+        'sessionReminders': true,
+        'verificationRequests': true,
+        'overdueThresholdDays': 7,
+        'sessionReminderDays': 3,
+      });
+
+      await ref.read(sessionServiceProvider).saveUserId(admin.id);
+      await ref.read(sessionServiceProvider).markSetupComplete();
+
+      // 3. Set the app auth state to the created admin.
+      ref.read(authServiceProvider).setCurrentUser(admin);
+      ref.read(authStateProvider.notifier).state = admin;
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/dashboard');
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -89,6 +131,54 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                     ),
                     validator: (v) =>
                         v == null || v.trim().isEmpty ? 'الاسم مطلوب' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _emailCtrl,
+                    textAlign: TextAlign.center,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: InputDecoration(
+                      labelText: 'البريد الإلكتروني',
+                      hintText: 'admin@example.com',
+                      prefixIcon: const Icon(Icons.email_outlined),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    validator: (v) {
+                      final val = v?.trim() ?? '';
+                      if (val.isEmpty) return 'البريد الإلكتروني مطلوب';
+                      if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(val)) {
+                        return 'بريد إلكتروني غير صالح';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _passwordCtrl,
+                    textAlign: TextAlign.center,
+                    obscureText: _obscure,
+                    decoration: InputDecoration(
+                      labelText: 'كلمة المرور',
+                      hintText: '6 أحرف على الأقل',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscure ? Icons.visibility_off : Icons.visibility,
+                        ),
+                        onPressed: () => setState(() => _obscure = !_obscure),
+                      ),
+                    ),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'كلمة المرور مطلوبة';
+                      if (v.length < 6) return '6 أحرف على الأقل';
+                      return null;
+                    },
+                    onFieldSubmitted: (_) => _createAdmin(),
                   ),
                   const SizedBox(height: 24),
                   SizedBox(

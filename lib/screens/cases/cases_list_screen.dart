@@ -219,7 +219,7 @@ class _CasesListScreenState extends ConsumerState<CasesListScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
-                value: _filterStatus,
+                initialValue: _filterStatus,
                 decoration: const InputDecoration(labelText: 'الحالة'),
                 items: const [
                   DropdownMenuItem(value: 'all', child: Text('الكل')),
@@ -231,7 +231,7 @@ class _CasesListScreenState extends ConsumerState<CasesListScreen> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _filterCategory,
+                initialValue: _filterCategory,
                 decoration: const InputDecoration(labelText: 'التصنيف'),
                 items: const [
                   DropdownMenuItem(value: 'all', child: Text('الكل')),
@@ -245,7 +245,7 @@ class _CasesListScreenState extends ConsumerState<CasesListScreen> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _filterLocation,
+                initialValue: _filterLocation,
                 decoration: const InputDecoration(labelText: 'الموقع'),
                 items: const [
                   DropdownMenuItem(value: 'all', child: Text('الكل')),

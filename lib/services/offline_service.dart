@@ -130,10 +130,25 @@ class OfflineService {
     return items;
   }
 
-  // Remove a completed queue item
-  Future<void> removeQueueItem(int index) async {
+  // Get queued operations together with their box keys (safe for removal)
+  Future<List<MapEntry<int, OfflineQueueItem>>> getQueueWithKeys() async {
     final box = await _queueBox;
-    await box.deleteAt(index);
+    final items = <MapEntry<int, OfflineQueueItem>>[];
+    for (final key in box.keys) {
+      final value = box.get(key);
+      if (value is String) {
+        items.add(MapEntry(key as int, OfflineQueueItem.fromJson(jsonDecode(value))));
+      }
+    }
+    return items;
+  }
+
+  // Remove a completed queue item by its box key
+  Future<void> removeQueueItem(int boxKey) async {
+    final box = await _queueBox;
+    if (box.containsKey(boxKey)) {
+      await box.delete(boxKey);
+    }
   }
 
   // Clear the entire queue
@@ -145,11 +160,12 @@ class OfflineService {
   // Process queue with conflict resolution
   Future<List<SyncConflict>> processQueue() async {
     final conflicts = <SyncConflict>[];
-    final queue = await getQueue();
     final box = await _queueBox;
+    final queue = await getQueueWithKeys();
 
-    for (int i = 0; i < queue.length; i++) {
-      final item = queue[i];
+    for (final entry in queue) {
+      final boxKey = entry.key;
+      final item = entry.value;
 
       try {
         switch (item.operation) {
@@ -165,7 +181,6 @@ class OfflineService {
               final remoteTimestamp = (remoteData['lastOperationDate'] as Timestamp?)?.toDate() ?? DateTime.now();
               final localTimestamp = item.timestamp;
 
-              // Judge > Clerk priority, same level = first commit wins
               if (_hasConflict(item, remoteData, localTimestamp, remoteTimestamp)) {
                 final resolution = _resolveConflict(item, remoteData, localTimestamp, remoteTimestamp);
                 conflicts.add(SyncConflict(
@@ -179,8 +194,8 @@ class OfflineService {
                 ));
 
                 if (resolution == 'remote') {
-                  // Remote wins, skip local update
-                  await removeQueueItem(i);
+                  // Remote wins, drop the local update
+                  await removeQueueItem(boxKey);
                   continue;
                 }
               }
@@ -192,15 +207,15 @@ class OfflineService {
             await _db.collection(item.collection).doc(item.docId).delete();
             break;
         }
-        await removeQueueItem(i);
+        await removeQueueItem(boxKey);
       } catch (e) {
         // Retry up to 3 times
         if (item.retryCount < 3) {
           final updatedItem = item.copyWith(retryCount: item.retryCount + 1);
-          await box.putAt(i, jsonEncode(updatedItem.toJson()));
+          await box.put(boxKey, jsonEncode(updatedItem.toJson()));
         } else {
-          // Remove after max retries
-          await removeQueueItem(i);
+          // Remove after max retries (keeps the queue from blocking forever)
+          await removeQueueItem(boxKey);
         }
       }
     }
@@ -319,6 +334,7 @@ class OfflineService {
     return (data as List).map((e) {
       return UserModel(
         id: e['id'] ?? '',
+        email: e['email'] ?? '',
         name: e['name'] ?? '',
         role: e['role'] ?? 'clerk',
         department: e['department'] ?? '',

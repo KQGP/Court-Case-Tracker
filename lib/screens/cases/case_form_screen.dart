@@ -41,9 +41,12 @@ class _CaseFormScreenState extends ConsumerState<CaseFormScreen> {
     }
   }
 
+  CaseModel? _originalCase;
+
   Future<void> _loadCase() async {
     final c = await ref.read(firestoreServiceProvider).getCase(widget.editCaseId!);
     if (c != null && mounted) {
+      _originalCase = c;
       setState(() {
         _caseSummaryCtrl.text = c.caseSummary;
         _numberCtrl.text = c.caseNumber;
@@ -86,6 +89,8 @@ class _CaseFormScreenState extends ConsumerState<CaseFormScreen> {
     final user = ref.read(authStateProvider);
     final service = ref.read(firestoreServiceProvider);
     final now = DateTime.now();
+    final isEdit = widget.editCaseId != null;
+    final original = _originalCase;
 
     final c = CaseModel(
       id: widget.editCaseId ?? Helpers.generateId(),
@@ -97,17 +102,38 @@ class _CaseFormScreenState extends ConsumerState<CaseFormScreen> {
       partyOnePersons: _parsePersons(_partyOnePersonsCtrl.text),
       partyTwoName: _partyTwoNameCtrl.text.trim(),
       partyTwoPersons: _parsePersons(_partyTwoPersonsCtrl.text),
+      status: original?.status ?? 'active',
+      currentHolder: original?.currentHolder ?? '',
+      currentHolderType: original?.currentHolderType ?? '',
+      currentHolderName: original?.currentHolderName ?? '',
       assignedJudgeId: _assignedJudgeId,
       assignedJudgeName: _assignedJudgeName,
       assignedClerkId: _assignedClerkId,
       assignedClerkName: _assignedClerkName,
-      createdAt: now,
-      createdBy: user?.id ?? '',
+      lastSessionDate: original?.lastSessionDate,
+      nextSessionDate: original?.nextSessionDate,
+      lastOperation: original?.lastOperation ?? '',
+      lastOperationDate: original?.lastOperationDate,
+      lastOperationBy: original?.lastOperationBy ?? '',
+      location: original?.location ?? 'dataCenter',
+      createdAt: original?.createdAt ?? now,
+      createdBy: original?.createdBy ?? user?.id ?? '',
     );
 
     await service.addCase(c);
 
-    if (widget.editCaseId == null && user != null) {
+    if (isEdit && user != null) {
+      await service.addHistory(HistoryModel(
+        id: Helpers.generateId(),
+        caseId: c.id,
+        type: 'edit',
+        description: 'تعديل بيانات القضية',
+        performedBy: user.id,
+        performedByName: user.name,
+        previousValue: original?.caseSummary ?? '',
+        newValue: c.caseSummary,
+      ));
+    } else if (user != null) {
       await service.addHistory(HistoryModel(
         id: Helpers.generateId(),
         caseId: c.id,
@@ -163,7 +189,7 @@ class _CaseFormScreenState extends ConsumerState<CaseFormScreen> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _category,
+                initialValue: _category,
                 decoration: const InputDecoration(labelText: 'التصنيف'),
                 items: AppConstants.caseCategories.map((c) {
                   return DropdownMenuItem(value: c, child: Text(AppConstants.categoryLabels[c] ?? c));
@@ -207,7 +233,7 @@ class _CaseFormScreenState extends ConsumerState<CaseFormScreen> {
               const SizedBox(height: 12),
               judgesAsync.when(
                 data: (judges) => DropdownButtonFormField<String>(
-                  value: _assignedJudgeId.isEmpty ? null : _assignedJudgeId,
+                  initialValue: _assignedJudgeId.isEmpty ? null : _assignedJudgeId,
                   decoration: const InputDecoration(labelText: 'القاضي'),
                   items: judges.map((j) {
                     return DropdownMenuItem(value: j.id, child: Text(j.name));
@@ -228,7 +254,7 @@ class _CaseFormScreenState extends ConsumerState<CaseFormScreen> {
               const SizedBox(height: 16),
               clerksAsync.when(
                 data: (clerks) => DropdownButtonFormField<String>(
-                  value: _assignedClerkId.isEmpty ? null : _assignedClerkId,
+                  initialValue: _assignedClerkId.isEmpty ? null : _assignedClerkId,
                   decoration: const InputDecoration(labelText: 'أمين السر'),
                   items: clerks.map((c) {
                     return DropdownMenuItem(value: c.id, child: Text(c.name));
