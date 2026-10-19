@@ -63,6 +63,3 @@ flutter build web        # Web
 ## ⚙️ Configuration
 - Locale is fixed to Arabic (Saudi Arabia) with RTL layout and the Cairo font.
 - Overdue threshold (days) and notification toggles are configurable in Settings and stored in Firestore (`settings`).
-
-## 📄 License
-No license specified. Add a `LICENSE` file if you intend to open-source.
